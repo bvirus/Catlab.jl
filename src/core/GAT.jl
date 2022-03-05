@@ -675,7 +675,6 @@ function invoke_term(theory_type::Type, instance_types::Tuple,
   # Get the corresponding Julia method from the parent module.
   method = getfield(parentmodule(theory_type), constructor_name)
   args = collect(Any, args)
-
   # Add dispatch on return type, if necessary.
   if !any(typeof(arg) <: typ for typ in instance_types for arg in args)
     # Case 1: Name refers to type constructor, e.g., generator constructor

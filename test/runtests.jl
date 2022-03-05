@@ -1,27 +1,27 @@
 using Test
 
 @testset "Core" begin
-  include("core/Core.jl")
+  # include("core/Core.jl")
 end
 
 @testset "Theories" begin
-  include("theories/Theories.jl")
+  # include("theories/Theories.jl")
 end
 
 @testset "CategoricalAlgebra" begin
-  include("categorical_algebra/CategoricalAlgebra.jl")
+  # include("categorical_algebra/CategoricalAlgebra.jl")
 end
 
 @testset "Graphs" begin
-  include("graphs/Graphs.jl")
+  # include("graphs/Graphs.jl")
 end
 
 @testset "WiringDiagrams" begin
-  include("wiring_diagrams/WiringDiagrams.jl")
+  # include("wiring_diagrams/WiringDiagrams.jl")
 end
 
 @testset "Graphics" begin
-  include("graphics/Graphics.jl")
+  # include("graphics/Graphics.jl")
 end
 
 @testset "Programs" begin
@@ -29,5 +29,5 @@ end
 end
 
 @testset "LinearAlgebra" begin
-  include("linear_algebra/LinearAlgebra.jl")
+  # include("linear_algebra/LinearAlgebra.jl")
 end

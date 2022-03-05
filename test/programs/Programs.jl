@@ -1,17 +1,21 @@
 using Test
 
+@testset "AutoProg" begin
+  include("AutoProg.jl")
+end
+
 @testset "GenerateJuliaPrograms" begin
-  include("GenerateJuliaPrograms.jl")
+  # include("GenerateJuliaPrograms.jl")
 end
 
 @testset "ParseJuliaPrograms" begin
-  include("ParseJuliaPrograms.jl")
+  # include("ParseJuliaPrograms.jl")
 end
 
 @testset "RelationalPrograms" begin
-  include("RelationalPrograms.jl")
+  # include("RelationalPrograms.jl")
 end
 
 @testset "DiagrammaticPrograms" begin
-  include("DiagrammaticPrograms.jl")
+  # include("DiagrammaticPrograms.jl")
 end

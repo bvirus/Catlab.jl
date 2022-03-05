@@ -1,15 +1,16 @@
-""" Parse Julia programs into morphisms represented as wiring diagrams.
-"""
-module ParseJuliaPrograms
-export @program, parse_wiring_diagram
+module AutoProg
+export @autoprog, autoparse_wiring_diagram
 
 using GeneralizedGenerated: mk_function
 using MLStyle: @match
 
 using ...Catlab
+using ...Catlab.Core
+
 import ...Meta: Expr0
-using ...Theories: ObExpr, HomExpr, otimes, munit
+using ...Theories: ObExpr, HomExpr, otimes, munit, dom, codom
 using ...WiringDiagrams
+using ...WiringDiagrams.DirectedWiringDiagrams
 using ..GenerateJuliaPrograms: make_return_value
 
 """ Parse a wiring diagram from a Julia program.
@@ -40,26 +41,44 @@ example, `f([x1,x2])` translates to `compose(mmerge(X),f)`.
 
 This macro is a wrapper around [`parse_wiring_diagram`](@ref).
 """
-macro program(pres, exprs...)
-  Expr(:call, GlobalRef(ParseJuliaPrograms, :parse_wiring_diagram),
-       esc(pres), (QuoteNode(expr) for expr in exprs)...)
+macro autoprog(syntax, exprs...)
+  Expr(:call, GlobalRef(AutoProg, :autoparse_wiring_diagram),
+    esc(syntax), (QuoteNode(expr) for expr in exprs)...)
+end
+
+struct FakeHom
+  name :: Symbol
+  in_sig :: Vector{Symbol}
+  out_sig :: Vector{Symbol}
+end
+
+function Base.:(==)(left :: FakeHom, right :: FakeHom) 
+  return left.name == right.name && left.in_sig == right.in_sig && left.out_sig == right.in_sig
+end
+
+mutable struct FakePres
+  obs :: Set{Symbol}
+  homs :: Dict{Symbol, FakeHom }
 end
 
 """ Parse a wiring diagram from a Julia function expression.
 
 For more information, see the corresponding macro [`@program`](@ref).
 """
-function parse_wiring_diagram(pres::Presentation, expr::Expr)::WiringDiagram
+# This function converts @autoprog(syntax, () -> ...) or @autoprog(syntax,
+# function() end) calls into the expected format that occurs when you use
+# @autoprog (args) begin end
+function autoparse_wiring_diagram(syntax::Module, expr::Expr)::Tuple{WiringDiagram, Presentation}
   @match expr begin
-    Expr(:function, call, body) => parse_wiring_diagram(pres, call, body)
-    Expr(:->, call, body) => parse_wiring_diagram(pres, call, body)
+    Expr(:function, call, body) => autoparse_wiring_diagram(syntax, call, body)
+    Expr(:->, call, body) => autoparse_wiring_diagram(syntax, call, body)
     _ => error("Not a function or lambda expression")
   end
 end
 
-function parse_wiring_diagram(pres::Presentation, call::Expr0, body::Expr)::WiringDiagram
+# The main branch of autoparse
+function autoparse_wiring_diagram(syntax_module::Module, call::Expr0, body::Expr)::Tuple{WiringDiagram, Presentation}
   # Parse argument names and types from call expression.
-  syntax_module = pres.syntax
   call_args = @match call begin
     Expr(:call, name, args...) => args
     Expr(:tuple, args...) => args
@@ -69,29 +88,33 @@ function parse_wiring_diagram(pres::Presentation, call::Expr0, body::Expr)::Wiri
   end
   parsed_args = map(call_args) do arg
     @match arg begin
-      Expr(:(::), name::Symbol, type_expr::Expr0) =>
-        (name, eval_type_expr(pres, syntax_module, type_expr))
+      Expr(:(::), name::Symbol, type_expr::Symbol) => (name, type_expr)
       _ => error("Argument $arg is missing name or type")
     end
   end
 
   # Compile...
   args = Symbol[ first(arg) for arg in parsed_args ]
-  kwargs = make_lookup_table(pres, syntax_module, unique_symbols(body))
-  func_expr = compile_recording_expr(body, args,
-    kwargs = sort!(collect(keys(kwargs))))
+  # kwargs = make_lookup_table(pres, syntax_module, unique_symbols(body))
+  func_expr = compile_recording_expr(body, args)
   func = mk_function(parentmodule(syntax_module), func_expr)
 
+  pres = Presentation(syntax_module)
+
   # ...and then evaluate function that records the function calls.
-  arg_obs = syntax_module.Ob[ last(arg) for arg in parsed_args ]
+  arg_obs = [ invoke_term(syntax_module, :Ob, arg) for arg in unique(map(last, parsed_args)) ]
+  for arg in arg_obs
+    add_generator!(pres, arg)
+  end
+  
   arg_blocks = Int[ length(to_wiring_diagram(ob)) for ob in arg_obs ]
   inputs = to_wiring_diagram(otimes(arg_obs))
   diagram = WiringDiagram(inputs, munit(typeof(inputs)))
   v_in, v_out = input_id(diagram), output_id(diagram)
   arg_ports = [ Tuple(Port(v_in, OutputPort, i) for i in (stop-len+1):stop)
                 for (len, stop) in zip(arg_blocks, cumsum(arg_blocks)) ]
-  recorder = f -> (args...) -> record_call!(diagram, f, args...)
-  value = func(recorder, arg_ports...; kwargs...)
+  recorder = (args...) -> record_call!(diagram, pres, args...)
+  value = func(recorder, arg_ports...)
 
   # Add outgoing wires for return values.
   out_ports = normalize_arguments((value,))
@@ -103,12 +126,12 @@ function parse_wiring_diagram(pres::Presentation, call::Expr0, body::Expr)::Wiri
     port => Port(v_out, InputPort, i)
     for (i, ports) in enumerate(out_ports) for port in ports
   ])
-  substitute(diagram)
+  return substitute(diagram), pres
 end
 
 """ Make a lookup table assigning names to generators or term constructors.
 """
-function make_lookup_table(pres::Presentation, syntax_module::Module, names)
+function make_lookup_table(pres::FakePres, syntax_module::Module, names)
   theory = GAT.theory(syntax_module.theory())
   terms = Set([ term.name for term in theory.terms ])
 
@@ -125,16 +148,16 @@ end
 
 """ Evaluate pseudo-Julia type expression, such as `X` or `otimes{X,Y}`.
 """
-function eval_type_expr(pres::Presentation, syntax_module::Module, expr::Expr0)
-  function _eval_type_expr(expr)
-    @match expr begin
-      Expr(:curly, name, args...) =>
-        invoke_term(syntax_module, name, map(_eval_type_expr, args)...)
-      name::Symbol => generator(pres, name)
-      _ => error("Invalid type expression $expr")
+function eval_type_expr(syntax_module :: Module, expr::Expr0)
+  @match expr begin
+    Expr(:curly, name, args...) => begin
+      invoke_term(syntax_module, name, map(_eval_type_expr, args)...)
     end
+    name::Symbol => begin 
+      
+    end
+    _ => error("Invalid type expression $expr")
   end
-  _eval_type_expr(expr)
 end
 
 """ Generate a Julia function expression that will record function calls.
@@ -151,8 +174,16 @@ function compile_recording_expr(body::Expr, args::Vector{Symbol};
     recorder::Symbol=Symbol("##recorder"))::Expr
   function rewrite(expr)
     @match expr begin
+      Expr(:(::), Expr(:call, f, args...), rettype::Symbol) => begin
+        rettype = QuoteNode(rettype) # TODO use syntax module
+        return Expr(:call, recorder, QuoteNode(f), :([ $rettype ]),  map(rewrite, args)...)
+      end
+      Expr(:(::), Expr(:call, f, args...), types) => begin
+        types = map(QuoteNode, types.args) # TODO use syntax module
+        return Expr(:call, recorder, QuoteNode(f), :([ $(types...) ]), map(rewrite, args)...)
+      end
       Expr(:call, f, args...) =>
-        Expr(:call, Expr(:call, recorder, rewrite(f)), map(rewrite, args)...)
+        Expr(:call, recorder, QuoteNode(f), map(rewrite, args)...)
       Expr(:curly, f, args...) =>
         Expr(:call, rewrite(f), map(rewrite, args)...)
       Expr(head, args...) => Expr(head, map(rewrite, args)...)
@@ -168,10 +199,39 @@ end
 
 """ Record a Julia function call as a box in a wiring diagram.
 """
-function record_call!(diagram::WiringDiagram, f::HomExpr, args...)
-  println("f: $(f) $(typeof(f))")
+function record_call!(diagram::WiringDiagram, pres::Presentation, f::Symbol, args...)
+  record_call!(diagram, pres, f, nothing, args...) 
+end
+function record_call!(diagram::WiringDiagram, pres::Presentation, f::Symbol, out_sig::Union{Vector{Symbol}, Nothing}, args...)
   # Add a new box, itself a wiring diagram, for the call.
-  subdiagram = to_wiring_diagram(f)
+  args = [ isa(a, Port) ? (a,) : a for a in args ]
+  term_args = [ port_value(diagram, first(arg)) for arg in args ]
+
+  g = if has_generator(pres, f)
+    g = generator(pres, f)
+    @assert gat_typeof(g) == :Hom
+    @assert dom(pres[f]) == foldl(otimes, [ pres[a] for a in term_args ] )
+    if out_sig != nothing
+      @assert codom(pres[f]) == foldl(otimes, [ pres[o] for o in out_sig ])
+    end
+    g
+  else 
+    @assert out_sig != nothing
+    term_outs = invoke_term(pres.syntax, :munit)
+    for o in out_sig
+      term = if has_generator(pres, o)
+        pres[o]
+      else 
+        t = invoke_term(pres.syntax, :Ob, o)
+        add_generator!(pres, t)
+      end
+      term_outs = otimes(term_outs, term)
+    end
+    term = invoke_term(pres.syntax, :Hom, f, foldl(otimes, [ pres[a] for a in term_args ]), term_outs)
+    add_generator!(pres, term)
+  end
+
+  subdiagram = to_wiring_diagram(g)
   v = add_box!(diagram, subdiagram)
 
   # Adding incoming wires.
@@ -185,6 +245,7 @@ function record_call!(diagram::WiringDiagram, f::HomExpr, args...)
 
   # Return output ports.
   outputs = output_ports(subdiagram)
+
   return_ports = [ Port(v, OutputPort, i) for i in eachindex(outputs) ]
   make_return_value(return_ports)
 end
@@ -213,5 +274,6 @@ unique_symbols(expr::Expr) =
   reduce(union!, map(unique_symbols, expr.args); init=Set{Symbol}())
 unique_symbols(x::Symbol) = Set([x])
 unique_symbols(x) = Set{Symbol}()
+
 
 end
