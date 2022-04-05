@@ -1,12 +1,15 @@
 using Revise
 
 using Catlab
+using Catlab.Syntax: syntax_module
 using Catlab.Programs, Catlab.Theories, Catlab.WiringDiagrams
+using Catlab.CategoricalAlgebra
 using Catlab.Programs.AutoProg
 using Catlab.Core
 using Catlab.Graphics
 using Catlab.Graphics.Graphviz
-using Catlab.Graphics.
+using Catlab.WiringDiagrams
+using Catlab.WiringDiagrams.DirectedWiringDiagrams
 
 draw(d::WiringDiagram) = to_graphviz(d,
   orientation=LeftToRight,
@@ -42,6 +45,21 @@ end
 # Petri Net
 show(pres)
 draw(test)
+typeof(FreeSymmetricMonoidalCategory)
+sch = parallel_schedule(internal_graph(test))
+d = test.diagram
+subpart(d, [1,2], :out_port_box)
+
+function gather(item :: Symbol, deps... :: Vector{Int})
+  print(item, deps)
+end
+generate_plan(test, Dict(
+  :f => function(x,y) return ("f", [x]) end,
+  :g => function(x,y) return ("g", [x, y]) end,
+  :h => function(x,y,z) return ("h", [x]) end
+), ["a.txt", "b.txt"])
+
+
 
 # look into functor function and tyler's blog post for mapping WiringDiagram
 # into semantics. Start with julia functions, move into Makefiles/WDL. Parallel
