@@ -1,5 +1,5 @@
 module AutoProg
-export @autoprog, autoparse_wiring_diagram, parallel_schedule, generate_plan
+export @autoprog, autoparse_wiring_diagram, depths_of, traverse_diagram
 
 using GeneralizedGenerated: mk_function
 using MLStyle: @match
@@ -114,7 +114,8 @@ function autoparse_wiring_diagram(syntax_module::Module, call::Expr0, body::Expr
   arg_ports = [ Tuple(Port(v_in, OutputPort, i) for i in (stop-len+1):stop)
                 for (len, stop) in zip(arg_blocks, cumsum(arg_blocks)) ]
   recorder = (args...) -> record_call!(diagram, pres, args...)
-  value = func(recorder, arg_ports...)
+  print(func, arg_ports)
+  value = func(recorder, arg_blocks, arg_ports...)
 
   # Add outgoing wires for return values.
   out_ports = normalize_arguments((value,))
@@ -275,109 +276,5 @@ unique_symbols(expr::Expr) =
 unique_symbols(x::Symbol) = Set([x])
 unique_symbols(x) = Set{Symbol}()
 
-
-function parallel_schedule(graph::ACSet)
-  # would be nice to implement this directly without
-  # cheating but its easier to just use the built-in
-  # topological_sort
-  sorted = topological_sort(graph)
-
-  level = 0
-  stages = []
-  stage = []
-
-  # this code is adapted an internal catlab method
-  # for finding the depths of all nodes in a graph
-  lengths = fill(0, nv(graph))
-  for v in sorted
-      lengths[v] = mapreduce(max, inneighbors(graph, v), init = 0) do u
-          lengths[u] + 1
-      end
-      if lengths[v] > level
-          push!(stages, stage)
-          stage = [v]
-          level = lengths[v]
-      else
-          push!(stage, v)
-      end
-  end
-
-  push!(stages, stage)
-  return stages
-end
-
-
-## A plan is a vector of vectors of strings, each string
-## being a command to execute on the command line.
-## Right now, there's no support for custom names
-## so the final output is just the output file with the 
-## largest number in the name
-function generate_plan(prog::WiringDiagram, ops::Dict{Symbol,Function}, inputs::Vector)::Vector{Vector{String}}
-  id = 0
-
-  # generate the command line string and the names
-  # of the output files give a task and a list of files
-  function apply(opcode :: Symbol, inputs::Vector)
-      return ops[opcode](inputs...)
-  end
-
-  d = prog.diagram
-  graph = internal_graph(prog)
-  @assert length(inputs) == nparts(d, :OuterInPort)
-  invals = Dict()
-  outvals = Dict()
-  outputs = Dict()
-
-
-  for iw in parts(d, :InWire)   # initialize input ports with the arguments to the function
-      v = inputs[d[iw, :in_src]]
-      invals[d[iw, :in_tgt]] = v
-  end
-
-  # the schedule is the outline of our final plan
-  # just with the node numbers instead of the correct
-  # strings
-  schedule = parallel_schedule(graph)
-
-  # so we can map over the plan and just transform
-  # everything in place (it's in the correct order
-  # thanks to using topological_sort)
-  println(schedule)
-  plan = map(schedule) do stage
-      return map(stage) do item
-
-          # get the task instance and all the input
-          # Files from the appropriate wires
-          opcode = d[item, :value]
-          inslots = incident(d, item, :in_port_box)
-          args = map(inslots) do slot
-              return invals[slot]
-          end
-
-          # generate the command string
-          cmd, rets = apply(opcode, args)
-          outslots = incident(d, item, :out_port_box)
-          println((cmd, rets, outslots))
-          @assert length(rets) == length(outslots)
-          for (i, slot) in pairs(outslots) # set all the output ports
-              outvals[slot] = rets[i]
-          end
-          # synchronize via the wires (pass output port data to input ports)
-          println("invals ", invals, " ", rets, " ", outvals)
-          println(incident(d, item, [:src]), " ", incident(d, item, [:out_port_box]))
-          for w in incident(d, item, [:src, :out_port_box])
-            tgt = d[w, :tgt]
-            src = d[w, :src]
-            println(tgt, " ", src)
-            invals[tgt] = outvals[src]
-          end
-          return cmd
-      end
-  end
-  # TODO: remove all .o files command
-  # while i > 0
-  #     push!(plan, ["rm"])
-  return plan
-end
 
 end
