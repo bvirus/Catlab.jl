@@ -41,6 +41,8 @@ test, pres = @autoprog FreeSymmetricMonoidalCategory (a::A, b::B) begin
     return h(c, d, e)::F
 end
 
+draw(test)
+
 # to draw arbitrary presentation, look at AlgebraicPetri, Theory of Petri Nets.
 # Ask andrew and micah (Github Issue), how to convert SMC presentation to a
 # Petri Net
@@ -63,24 +65,29 @@ makefile = compile_to_makefile(defs, ["a.txt", "b.txt"] => ["final.txt"], test)
 
 print("Done!")
 
-# sdl_test, sdl_test_pres = @autoprog FreeSymmetricMonoidalCategory (file1::CPPFILE, file2::CPPFILE, file3::CPPFILE, file4::CPPFILE) begin
-#     main = SDL_GPP(file1)::ObjectFile
-#     screen = SDL_GPP(file2)
-#     particle = GPP(file3)::ObjectFile
-#     swarm = GPP(file4)
-#     particleSwarm = LINK_CPP(particle, swarm)::ObjectFile
-#     screenPS = LINK_CPP(screen, particleSwarm)
-#     allLinked = LINK_CPP(main, screenPS)
-#     exe = MAKE_SDL_EXE(allLinked)::ExeFile
-#     return exe
-# end
+# somethings wrong with multiple same-type inputs
+sdl_test, sdl_test_pres = @autoprog FreeSymmetricMonoidalCategory (file1::CPP, file2::CPP, file3::CPP, file4::CPP) begin
+    main = SDL_GPP(file1)::O
+    screen = SDL_GPP(file2)
+    particle = GPP(file3)::O
+    swarm = GPP(file4)
+    particleSwarm = LINK_CPP(particle, swarm)::O
+    screenPS = LINK_CPP(screen, particleSwarm)
+    allLinked = LINK_CPP(main, screenPS)
+    exe = MAKE_SDL_EXE(allLinked)::EXE
+    return exe
+end
+draw(sdl_test)
+show(sdl_test_pres)
+sdl_dict = Dict(
+  :GPP => (@shelltask "g++" input(1) "-c" "-o" output(1)),
+  :SDL_GPP => (@shelltask "g++" input(1) "-c" "-o" output(1)),
+  :LINK_CPP => (@shelltask "ld -relocatable" input(1) input(2) "-o" output(1, ".o")),
+  :MAKE_SDL_EXE => (@shelltask "g++" input(1) "-o" output(1) "\$(sdl2-config --libs)")
+)
 
-# sdl_dict = Dict(
-#   :GPP => (@shelltask "g++" input(1) "-c" "-o" output(1))
-#   :SDL_GPP => (@shelltask "g++" input(1) "-c" "-o" output(1)).
-#   :LINK_CPP => (@shelltask "ld -relocatable" input(1) input(2) "-o" output(1, ext=".o"))
-#   :MAKE_SDL_EXE => (@shelltask "g++" input(1) "-o" output(1) "\$(sdl2-config --libs)")
-# )
+shell_script = compile_to_shell(sdl_dict, ["main.cpp", "Screen.cpp", "Particle.cpp", "Swarm.cpp"] => ["application"], sdl_test)
+shell_script = compile_to_makefile(sdl_dict, ["main.cpp", "Screen.cpp", "Particle.cpp", "Swarm.cpp"] => ["application"], sdl_test)
 
 
 # look into functor function and tyler's blog post for mapping WiringDiagram

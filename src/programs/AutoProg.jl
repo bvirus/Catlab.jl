@@ -100,22 +100,39 @@ function autoparse_wiring_diagram(syntax_module::Module, call::Expr0, body::Expr
   func = mk_function(parentmodule(syntax_module), func_expr)
 
   pres = Presentation(syntax_module)
+  println(args)
 
   # ...and then evaluate function that records the function calls.
-  arg_obs = [ invoke_term(syntax_module, :Ob, arg) for arg in unique(map(last, parsed_args)) ]
-  for arg in arg_obs
-    add_generator!(pres, arg)
+  terms = Dict()
+  arg_obs = []
+  for (arg, arg_type) in parsed_args
+    term = if arg_type in keys(terms)
+      terms[arg_type]
+    else 
+      t = invoke_term(syntax_module, :Ob, arg_type)
+      add_generator!(pres, t)
+      terms[arg_type] = t
+      t
+    end
+    push!(arg_obs, term)
   end
+  println("terms ",terms)
+  println("arg_obs", arg_obs)
+
+  # for arg in arg_obs
+  #   add_generator!(pres, arg)
+  # end
   
   arg_blocks = Int[ length(to_wiring_diagram(ob)) for ob in arg_obs ]
+  println(arg_obs)
   inputs = to_wiring_diagram(otimes(arg_obs))
   diagram = WiringDiagram(inputs, munit(typeof(inputs)))
   v_in, v_out = input_id(diagram), output_id(diagram)
   arg_ports = [ Tuple(Port(v_in, OutputPort, i) for i in (stop-len+1):stop)
                 for (len, stop) in zip(arg_blocks, cumsum(arg_blocks)) ]
   recorder = (args...) -> record_call!(diagram, pres, args...)
-  print(func, arg_ports)
-  value = func(recorder, arg_blocks, arg_ports...)
+  println(arg_ports, "\t", arg_blocks)
+  value = func(recorder, arg_ports...)
 
   # Add outgoing wires for return values.
   out_ports = normalize_arguments((value,))
