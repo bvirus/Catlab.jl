@@ -115,7 +115,6 @@ function compile_to_shell(mapping :: Dict{Symbol, ShellTask}, inputs :: Vector{S
   id = 0
 
   # TODO find a way to reorder to the outputs based on index
-
   outs = traverse_diagram(inputs, diagram) do box :: Int64, deps :: Vector{String}
     label = d[box, :value]
     outs = Dict()
@@ -131,7 +130,7 @@ function compile_to_shell(mapping :: Dict{Symbol, ShellTask}, inputs :: Vector{S
     return sort(collect(outs), by=first) |> y -> map(last, y)
   end
 
-  push!(script, [ "mv $left $right" for (left, right) in zip(outs, outputs) ]...)
+  push!(script, [ "cp $left $right" for (left, right) in zip(outs, outputs) ]...)
   push!(script, removes...)
   return join(script, "\n")
 end
@@ -152,7 +151,7 @@ function compile_to_makefile(mapping :: Dict{Symbol, ShellTask}, inputs :: Vecto
     function newoutput(pos, ext = "")
       id += 1
       v = "out$id$ext"
-      push!(removes, "rm $v") 
+      push!(removes, "rm -f $v") 
       outs[pos] = v
       return v
     end
@@ -164,9 +163,9 @@ function compile_to_makefile(mapping :: Dict{Symbol, ShellTask}, inputs :: Vecto
 
     return outs
   end
-  moves = join([ "mv $left $right" for (left, right) in zip(outs, outputs) ], "\n\t")
-  push!(script, ".PHONY: all\nall: $(join(outs, " "))\n\t$moves " )
-  push!(script, ".PHONY: clean\nclean:\n\t$(join(removes, "\n\t"))")
+  moves = join([ "cp $left $right" for (left, right) in zip(outs, outputs) ], "\n\t")
+  pushfirst!(script, ".PHONY: all\nall: $(join(outs, " "))\n\t$moves " )
+  push!(script, ".PHONY: clean\nclean: \n\t$(join(removes, "\n\t"))")
   return join(script, "\n\n")
 end
 

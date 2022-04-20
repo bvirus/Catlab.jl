@@ -65,7 +65,6 @@ makefile = compile_to_makefile(defs, ["a.txt", "b.txt"] => ["final.txt"], test)
 
 print("Done!")
 
-# somethings wrong with multiple same-type inputs
 sdl_test, sdl_test_pres = @autoprog FreeSymmetricMonoidalCategory (file1::CPP, file2::CPP, file3::CPP, file4::CPP) begin
     main = SDL_GPP(file1)::O
     screen = SDL_GPP(file2)
